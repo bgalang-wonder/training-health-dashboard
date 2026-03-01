@@ -1,87 +1,171 @@
-const OURA_API_URL = "https://api.ouraring.com/v2/usercollection";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
+const OURA_RAW_DIR = path.join(process.cwd(), "data", "oura", "raw");
 
 export interface OuraDailySummary {
-    date: string;
-    readiness_score: number | null;
-    sleep_score: number | null;
-    activity_score: number | null;
-    hrv_balance_score: number | null;
-    heart_rate_data: { timestamp: string; bpm: number }[]; // Intraday 5-min intervals
+  date: string;
+  readiness_score: number | null;
+  sleep_score: number | null;
+  activity_score: number | null;
+  hrv_balance_score: number | null;
+  heart_rate_data: { timestamp: string; bpm: number }[];
+}
+
+type OuraReadinessRecord = {
+  day?: string;
+  score?: number | null;
+  contributors?: {
+    hrv_balance?: number | null;
+  };
+};
+
+type OuraScoreRecord = {
+  day?: string;
+  score?: number | null;
+};
+
+type OuraHeartRateRecord = {
+  timestamp?: string;
+  bpm?: number | null;
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractDataArray<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[];
+  }
+
+  if (!isObject(payload)) {
+    return [];
+  }
+
+  if (Array.isArray(payload.data)) {
+    return payload.data as T[];
+  }
+
+  if (Array.isArray(payload.pages)) {
+    return payload.pages.flatMap((page) => extractDataArray<T>(page));
+  }
+
+  return [];
+}
+
+async function readLocalEndpoint(endpoint: string): Promise<unknown | null> {
+  const filePath = path.join(OURA_RAW_DIR, `${endpoint}.json`);
+
+  try {
+    const content = await readFile(filePath, "utf8");
+    return JSON.parse(content) as unknown;
+  } catch (error) {
+    if (isObject(error) && error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function createEmptySummary(date: string): OuraDailySummary {
+  return {
+    date,
+    readiness_score: null,
+    sleep_score: null,
+    activity_score: null,
+    hrv_balance_score: null,
+    heart_rate_data: [],
+  };
 }
 
 export async function fetchOuraData(startDate: string): Promise<Record<string, OuraDailySummary>> {
-    const token = process.env.OURA_ACCESS_TOKEN;
-    if (!token) {
-        console.error("No OURA_ACCESS_TOKEN found.");
-        return {};
+  const requiredEndpoints = ["daily_readiness", "daily_sleep", "daily_activity", "heartrate"] as const;
+
+  try {
+    const payloads = await Promise.all(requiredEndpoints.map((endpoint) => readLocalEndpoint(endpoint)));
+
+    const missing = requiredEndpoints.filter((endpoint, index) => payloads[index] === null);
+    if (missing.length > 0) {
+      console.warn(
+        `[oura] Missing local sync files: ${missing
+          .map((endpoint) => `data/oura/raw/${endpoint}.json`)
+          .join(", ")}. Run \"npm run oura:sync\" first.`,
+      );
+      return {};
     }
 
-    const headers = { Authorization: `Bearer ${token}` };
-    const params = `?start_date=${startDate}`;
+    const [readinessPayload, sleepPayload, activityPayload, heartratePayload] = payloads;
 
-    try {
-        const [readinessRes, sleepRes, activityRes, heartrateRes] = await Promise.all([
-            fetch(`${OURA_API_URL}/daily_readiness${params}`, { headers, next: { revalidate: 3600 } }),
-            fetch(`${OURA_API_URL}/daily_sleep${params}`, { headers, next: { revalidate: 3600 } }),
-            fetch(`${OURA_API_URL}/daily_activity${params}`, { headers, next: { revalidate: 3600 } }),
-            fetch(`${OURA_API_URL}/heartrate${params}`, { headers, next: { revalidate: 3600 } })
-        ]);
+    const readinessData = extractDataArray<OuraReadinessRecord>(readinessPayload);
+    const sleepData = extractDataArray<OuraScoreRecord>(sleepPayload);
+    const activityData = extractDataArray<OuraScoreRecord>(activityPayload);
+    const heartrateData = extractDataArray<OuraHeartRateRecord>(heartratePayload);
 
-        const readinessData = await readinessRes.json();
-        const sleepData = await sleepRes.json();
-        const activityData = await activityRes.json();
-        const heartrateData = await heartrateRes.json();
+    const summaries: Record<string, OuraDailySummary> = {};
 
-        const summaries: Record<string, OuraDailySummary> = {};
+    const ensureDay = (day: string): OuraDailySummary => {
+      if (!summaries[day]) {
+        summaries[day] = createEmptySummary(day);
+      }
+      return summaries[day];
+    };
 
-        // Map Readiness
-        if (readinessData.data) {
-            readinessData.data.forEach((item: any) => {
-                summaries[item.day] = {
-                    date: item.day,
-                    readiness_score: item.score,
-                    hrv_balance_score: item.contributors?.hrv_balance || null,
-                    sleep_score: null,
-                    activity_score: null,
-                    heart_rate_data: []
-                };
-            });
-        }
+    for (const item of readinessData) {
+      if (!item.day || item.day < startDate) {
+        continue;
+      }
 
-        // Map Sleep
-        if (sleepData.data) {
-            sleepData.data.forEach((item: any) => {
-                if (!summaries[item.day]) summaries[item.day] = { date: item.day, readiness_score: null, hrv_balance_score: null, sleep_score: null, activity_score: null, heart_rate_data: [] };
-                summaries[item.day].sleep_score = item.score;
-            });
-        }
+      const summary = ensureDay(item.day);
+      summary.readiness_score = typeof item.score === "number" ? item.score : null;
 
-        // Map Activity
-        if (activityData.data) {
-            activityData.data.forEach((item: any) => {
-                if (!summaries[item.day]) summaries[item.day] = { date: item.day, readiness_score: null, hrv_balance_score: null, sleep_score: null, activity_score: null, heart_rate_data: [] };
-                summaries[item.day].activity_score = item.score;
-            });
-        }
-
-        // Map Intraday Heart Rate
-        if (heartrateData.data) {
-            heartrateData.data.forEach((item: any) => {
-                // item.timestamp looks like "2026-02-25T08:05:00+00:00"
-                const dayStr = item.timestamp.split('T')[0];
-                if (!summaries[dayStr]) {
-                    summaries[dayStr] = { date: dayStr, readiness_score: null, hrv_balance_score: null, sleep_score: null, activity_score: null, heart_rate_data: [] };
-                }
-                summaries[dayStr].heart_rate_data.push({
-                    timestamp: item.timestamp,
-                    bpm: item.bpm
-                });
-            });
-        }
-
-        return summaries;
-    } catch (error) {
-        console.error("Error fetching Oura data:", error);
-        return {};
+      const hrvBalance = item.contributors?.hrv_balance;
+      summary.hrv_balance_score = typeof hrvBalance === "number" ? hrvBalance : null;
     }
+
+    for (const item of sleepData) {
+      if (!item.day || item.day < startDate) {
+        continue;
+      }
+
+      const summary = ensureDay(item.day);
+      summary.sleep_score = typeof item.score === "number" ? item.score : null;
+    }
+
+    for (const item of activityData) {
+      if (!item.day || item.day < startDate) {
+        continue;
+      }
+
+      const summary = ensureDay(item.day);
+      summary.activity_score = typeof item.score === "number" ? item.score : null;
+    }
+
+    for (const item of heartrateData) {
+      if (!item.timestamp || !item.timestamp.includes("T")) {
+        continue;
+      }
+
+      const day = item.timestamp.split("T")[0];
+      if (day < startDate) {
+        continue;
+      }
+
+      if (typeof item.bpm !== "number") {
+        continue;
+      }
+
+      const summary = ensureDay(day);
+      summary.heart_rate_data.push({
+        timestamp: item.timestamp,
+        bpm: item.bpm,
+      });
+    }
+
+    return summaries;
+  } catch (error) {
+    console.error("[oura] Error reading local Oura data:", error);
+    return {};
+  }
 }
