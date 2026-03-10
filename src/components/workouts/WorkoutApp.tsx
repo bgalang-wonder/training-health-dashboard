@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
+  ChevronLeft,
+  ChevronRight,
   CalendarDays,
   CheckCircle2,
-  ClipboardList,
   Copy,
   Grip,
   Plus,
@@ -14,7 +15,7 @@ import {
   Target,
   XCircle,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
 import { api } from "../../../convex/_generated/api";
 import {
   calculateTotalLoad,
@@ -29,7 +30,7 @@ import {
   type WorkoutExerciseStatus,
 } from "../../lib/training";
 
-type WorkoutView = "today" | "history" | "programs";
+type WorkoutView = "today" | "programs";
 
 type SetDraft = {
   set_id: string;
@@ -86,8 +87,7 @@ type ProgramDraft = {
 };
 
 const WORKOUT_VIEWS: Array<{ id: WorkoutView; label: string }> = [
-  { id: "today", label: "Today" },
-  { id: "history", label: "History" },
+  { id: "today", label: "Workout" },
   { id: "programs", label: "Programs" },
 ];
 
@@ -100,6 +100,14 @@ const STATUS_OPTIONS: Array<{ value: WorkoutExerciseStatus; label: string }> = [
 
 function todayString() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function shiftDate(value: string, amount: number) {
+  try {
+    return format(addDays(parseISO(value), amount), "yyyy-MM-dd");
+  } catch {
+    return format(addDays(new Date(), amount), "yyyy-MM-dd");
+  }
 }
 
 function formatDateLabel(value: string) {
@@ -587,20 +595,6 @@ export default function WorkoutApp() {
     [selectedLog, selectedPlan, workoutDraft],
   );
 
-  const historyItems = useMemo(() => {
-    return (logs ?? []).map((log) => {
-      const linkedPlan =
-        (log.completed_plan_id ? plansByVersionId.get(log.completed_plan_id) : undefined) ??
-        resolvePlanForDate(planVersions, log.date);
-
-      return {
-        log,
-        plan: linkedPlan,
-        summary: getWorkoutCompletionSummary(linkedPlan, log.exercises),
-      };
-    });
-  }, [logs, planVersions, plansByVersionId]);
-
   function updateDraft<K extends keyof WorkoutDraft>(key: K, value: WorkoutDraft[K]) {
     setWorkoutDraft((current) => (current ? { ...current, [key]: value } : current));
   }
@@ -823,12 +817,11 @@ export default function WorkoutApp() {
               Workout Program Tracker
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-900">
-              Execute the plan without losing the history
+              Move day to day without leaving the workout flow
             </h1>
             <p className="mt-2 text-sm leading-6 text-neutral-600">
-              Today is optimized for live logging. History keeps old workouts pinned to the exact
-              plan version they were performed against, and Programs is where you duplicate and
-              edit Ryan&apos;s next version.
+              This workspace acts like a workout journal. Flip dates from the header to review,
+              edit, or log a session while keeping each day linked to the plan version it actually used.
             </p>
           </div>
 
@@ -871,6 +864,60 @@ export default function WorkoutApp() {
 
       {view === "today" && (
         <div className="space-y-6">
+          <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
+                  Workout date
+                </p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
+                  {formatDateLabel(selectedDate)}
+                </h2>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Use arrows for quick day-to-day review or jump with the calendar.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="grid grid-cols-[auto_1fr_auto] gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate((current) => shiftDate(current, -1))}
+                    className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50 text-neutral-700 transition hover:border-neutral-300 hover:bg-white hover:text-neutral-900"
+                    aria-label="Previous day"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <label className="min-w-[190px]">
+                    <span className="sr-only">Workout date</span>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(event) => setSelectedDate(event.target.value)}
+                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 text-sm font-semibold text-neutral-900 outline-none transition focus:border-teal-500 focus:bg-white"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate((current) => shiftDate(current, 1))}
+                    className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50 text-neutral-700 transition hover:border-neutral-300 hover:bg-white hover:text-neutral-900"
+                    aria-label="Next day"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(todayString())}
+                  className="inline-flex h-12 items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-neutral-300 hover:text-neutral-900"
+                >
+                  Jump to today
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section className="grid gap-4">
             <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
               <div className="flex items-center gap-2 text-sm font-semibold text-neutral-700">
@@ -878,15 +925,6 @@ export default function WorkoutApp() {
                 Session setup
               </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-neutral-700">Date</span>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(event) => setSelectedDate(event.target.value)}
-                    className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white"
-                  />
-                </label>
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-neutral-700">Focus / title</span>
                   <input
@@ -918,6 +956,17 @@ export default function WorkoutApp() {
                   </p>
                   <p className="mt-1 text-sm text-neutral-500">
                     {completionSummary.added} custom additions
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
+                    Log state
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-neutral-900">
+                    {selectedLog ? "Existing day loaded" : "Fresh day draft"}
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    {workoutIsDirty ? "Unsaved changes in progress" : "Everything saved or unchanged"}
                   </p>
                 </div>
               </div>
@@ -1243,55 +1292,6 @@ export default function WorkoutApp() {
             )}
           </section>
         </div>
-      )}
-
-      {view === "history" && (
-        <section className="space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
-              Workout history
-            </p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
-              Reopen past days against the plan version they actually used
-            </h2>
-          </div>
-
-          <div className="space-y-4">
-            {historyItems.map(({ log, plan, summary }) => (
-              <article
-                key={log.date}
-                className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6 elevation-1"
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">
-                      {formatDateLabel(log.date)}
-                    </p>
-                    <h3 className="mt-1 text-xl font-semibold text-neutral-900">
-                      {log.focus || "Workout log"}
-                    </h3>
-                    <p className="mt-2 text-sm text-neutral-600">
-                      {plan?.title ?? "No linked plan"} • {summary.completed} done •{" "}
-                      {summary.modified} modified • {summary.skipped} skipped • {summary.added} added
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedDate(log.date);
-                      setView("today");
-                    }}
-                    className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:text-neutral-900 elevation-1 interactive-card"
-                  >
-                    <ClipboardList className="h-4 w-4" />
-                    Open day
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
       )}
 
       {view === "programs" && (
