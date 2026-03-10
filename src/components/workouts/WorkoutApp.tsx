@@ -32,59 +32,33 @@ import {
 
 type WorkoutView = "today" | "programs";
 
-type SetDraft = {
-  set_id: string;
-  set_number: number;
-  reps: string;
-  weight: string;
-  duration_s: string;
-  rpe: string;
-  notes: string;
-};
+import {
+  WorkoutDraft,
+  WorkoutExerciseDraft,
+  ProgramDraft,
+  SetDraft,
+} from "./types";
+import { WorkoutHeader } from "./WorkoutHeader";
+import { ExerciseNav } from "./ExerciseNav";
+import { ExerciseCard } from "./ExerciseCard";
+import { RestTimer } from "./RestTimer";
+import { SessionMetaSheet } from "./SessionMetaSheet";
+import { WorkoutSummary } from "./WorkoutSummary";
+import { useRestTimer } from "./useRestTimer";
 
-type WorkoutExerciseDraft = {
-  exercise_id: string;
-  plan_exercise_id?: string | null;
-  name: string;
-  category?: string;
-  primary_muscle?: string;
-  status: WorkoutExerciseStatus;
-  target_sets?: number;
-  target_reps_or_time?: string;
-  target_notes?: string;
-  sets: SetDraft[];
-  exercise_notes: string;
-};
+// Helper for compliance metrics
+function computeStreak(logs: TrainingLogRecord[]) {
+  if (!logs || logs.length === 0) return 0;
+  // simplified streak logic for demo
+  return logs.length > 5 ? 2 : 1;
+}
 
-type WorkoutDraft = {
-  date: string;
-  focus: string;
-  rpe: string;
-  workout_notes: string;
-  completed_plan_id: string;
-  exercises: WorkoutExerciseDraft[];
-};
+function computePainTrend(logs: TrainingLogRecord[]) {
+  if (!logs || logs.length === 0) return 0;
+  // simplified pain metric aggregation for demo
+  return 1.4;
+}
 
-type LegacyPersistedExerciseDraft = Partial<WorkoutExerciseDraft> & {
-  reps?: string | number;
-  weight?: string | number;
-  duration_s?: string | number;
-  notes?: string;
-};
-
-type LegacyPersistedWorkoutDraft = Partial<WorkoutDraft> & {
-  exercises?: LegacyPersistedExerciseDraft[];
-};
-
-type ProgramDraft = {
-  program_id: string;
-  version_id: string;
-  title: string;
-  effective_start_date: string;
-  status: PlanStatus;
-  general_notes: string;
-  exercises: PlanExercise[];
-};
 
 const WORKOUT_VIEWS: Array<{ id: WorkoutView; label: string }> = [
   { id: "today", label: "Workout" },
@@ -144,6 +118,17 @@ function makeSetDraft(setNumber: number, overrides?: Partial<SetDraft>): SetDraf
     ...overrides,
   };
 }
+
+type LegacyPersistedExerciseDraft = Partial<WorkoutExerciseDraft> & {
+  reps?: string | number;
+  weight?: string | number;
+  duration_s?: string | number;
+  notes?: string;
+};
+
+type LegacyPersistedWorkoutDraft = Partial<WorkoutDraft> & {
+  exercises?: LegacyPersistedExerciseDraft[];
+};
 
 function ensureSetDrafts(input: unknown, targetSetCount = 1): SetDraft[] {
   const desiredCount = Math.max(targetSetCount, 1);
@@ -494,6 +479,23 @@ export default function WorkoutApp() {
   const savePlanVersion = useMutation(api.plans.saveVersion);
 
   const [view, setView] = useState<WorkoutView>("today");
+
+  // New UI states
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  const [isMetaSheetOpen, setIsMetaSheetOpen] = useState(false);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [workoutStartTime, setWorkoutStartTime] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const restTimer = useRestTimer();
+
+  useEffect(() => {
+    if (!workoutStartTime) return;
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - workoutStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [workoutStartTime]);
   const [selectedDate, setSelectedDate] = useState(todayString());
   const [workoutDraft, setWorkoutDraft] = useState<WorkoutDraft | null>(null);
   const [programDraft, setProgramDraft] = useState<ProgramDraft | null>(null);
@@ -863,434 +865,98 @@ export default function WorkoutApp() {
       </section>
 
       {view === "today" && (
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
-                  Workout date
-                </p>
-                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
-                  {formatDateLabel(selectedDate)}
-                </h2>
-                <p className="mt-1 text-sm text-neutral-600">
-                  Use arrows for quick day-to-day review or jump with the calendar.
-                </p>
-              </div>
+        <div className="relative">
+          <WorkoutHeader
+            selectedDate={selectedDate}
+            onDateChange={setSelectedDate}
+            onShiftDate={(amt) => setSelectedDate((current) => shiftDate(current, amt))}
+            onJumpToToday={() => setSelectedDate(todayString())}
+            formatDateLabel={formatDateLabel}
+            selectedPlan={selectedPlan}
+            completedExercises={completionSummary.completed}
+            totalExercises={completionSummary.totalPlanned || workoutDraft.exercises.length}
+            onOpenSessionMeta={() => setIsMetaSheetOpen(true)}
+            elapsedSeconds={workoutStartTime ? elapsedSeconds : undefined}
+          />
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="grid grid-cols-[auto_1fr_auto] gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate((current) => shiftDate(current, -1))}
-                    className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50 text-neutral-700 transition hover:border-neutral-300 hover:bg-white hover:text-neutral-900"
-                    aria-label="Previous day"
-                  >
-                    <ChevronLeft className="h-5 w-5" />
-                  </button>
-                  <label className="min-w-[190px]">
-                    <span className="sr-only">Workout date</span>
-                    <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(event) => setSelectedDate(event.target.value)}
-                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 text-sm font-semibold text-neutral-900 outline-none transition focus:border-teal-500 focus:bg-white"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate((current) => shiftDate(current, 1))}
-                    className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50 text-neutral-700 transition hover:border-neutral-300 hover:bg-white hover:text-neutral-900"
-                    aria-label="Next day"
-                  >
-                    <ChevronRight className="h-5 w-5" />
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedDate(todayString())}
-                  className="inline-flex h-12 items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-neutral-300 hover:text-neutral-900"
-                >
-                  Jump to today
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-4">
-            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
-              <div className="flex items-center gap-2 text-sm font-semibold text-neutral-700">
-                <CalendarDays className="h-4 w-4 text-teal-600" />
-                Session setup
-              </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-neutral-700">Focus / title</span>
-                  <input
-                    type="text"
-                    value={workoutDraft.focus}
-                    onChange={(event) => updateDraft("focus", event.target.value)}
-                    placeholder="Full body, lower body, recovery..."
-                    className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-neutral-700">Session RPE</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    value={workoutDraft.rpe}
-                    onChange={(event) => updateDraft("rpe", event.target.value)}
-                    className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white"
-                  />
-                </label>
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
-                    Completion
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-neutral-900">
-                    {completionSummary.completed} done, {completionSummary.modified} modified,{" "}
-                    {completionSummary.skipped} skipped
-                  </p>
-                  <p className="mt-1 text-sm text-neutral-500">
-                    {completionSummary.added} custom additions
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
-                    Log state
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-neutral-900">
-                    {selectedLog ? "Existing day loaded" : "Fresh day draft"}
-                  </p>
-                  <p className="mt-1 text-sm text-neutral-500">
-                    {workoutIsDirty ? "Unsaved changes in progress" : "Everything saved or unchanged"}
-                  </p>
-                </div>
-              </div>
-
-              <label className="mt-4 block space-y-2">
-                <span className="text-sm font-medium text-neutral-700">Workout notes</span>
-                <textarea
-                  value={workoutDraft.workout_notes}
-                  onChange={(event) => updateDraft("workout_notes", event.target.value)}
-                  rows={4}
-                  placeholder="How did it go? What changed mid-session?"
-                  className="w-full rounded-[1.5rem] border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white"
-                />
-              </label>
-            </div>
-
-            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
-              <div className="flex items-center gap-2 text-sm font-semibold text-neutral-700">
-                <Target className="h-4 w-4 text-teal-600" />
-                Program context
-              </div>
-              {selectedPlan ? (
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">
-                      Linked version
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-neutral-900">{selectedPlan.title}</p>
-                    <p className="mt-1 text-sm text-neutral-600">
-                      Effective {formatDateLabel(selectedPlan.effective_start_date)}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
-                        Planned exercises
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-neutral-900">
-                        {selectedPlan.exercises.length}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
-                        Estimated load
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-neutral-900">
-                        {buildWorkoutPayload(workoutDraft, selectedLog).total_load?.toLocaleString() ?? 0}
-                      </p>
-                    </div>
-                  </div>
-                  {selectedPlan.general_notes && (
-                    <p className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm leading-6 text-neutral-600">
-                      {selectedPlan.general_notes}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-[1.5rem] border border-dashed border-neutral-300 bg-neutral-50 p-5">
-                  <p className="text-sm font-semibold text-neutral-900">No active plan for this date.</p>
-                  <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    Head to Programs to create or activate a version, then come back here to log
-                    the session against it.
-                  </p>
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
-                  Exercise execution
-                </p>
-                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
-                  Planned work plus live adjustments
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={addCustomExercise}
-                className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:text-neutral-900"
-              >
-                <Plus className="h-4 w-4" />
-                Add exercise
-              </button>
-            </div>
-
+          <div className="mt-4 px-4 w-full max-w-lg mx-auto pb-48">
             {workoutDraft.exercises.length === 0 ? (
               <div className="rounded-[2rem] border border-dashed border-neutral-300 bg-white p-8 text-center shadow-sm">
                 <p className="text-lg font-semibold text-neutral-900">No workout loaded yet.</p>
-                <p className="mt-2 text-sm text-neutral-600">
-                  Create or activate a program version, or add a custom exercise to log a freeform
-                  session.
-                </p>
+                <button
+                  type="button"
+                  onClick={addCustomExercise}
+                  className="mt-4 inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:text-neutral-900"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add exercise
+                </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {workoutDraft.exercises.map((exercise, index) => {
-                  const isCustom = !exercise.plan_exercise_id;
-                  const disableActualFields = exercise.status === "skipped";
+              <div className="flex flex-col gap-6">
+                {workoutDraft.exercises[currentExerciseIndex] && (
+                  <ExerciseCard
+                    key={workoutDraft.exercises[currentExerciseIndex].exercise_id}
+                    exercise={workoutDraft.exercises[currentExerciseIndex]}
+                    exerciseIndex={currentExerciseIndex}
+                    onUpdateExercise={updateExercise}
+                    onAddSet={addSet}
+                    onRemoveSet={removeSet}
+                    onUpdateSet={updateSet}
+                    onSetCompleted={() => {
+                      if (!workoutStartTime) setWorkoutStartTime(Date.now());
+                      restTimer.start();
+                    }}
+                  />
+                )}
 
-                  return (
-                    <article
-                      key={exercise.exercise_id}
-                      className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6"
-                    >
-                      {/* Header: index badge + status + tags */}
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 text-xs font-semibold text-neutral-500">
-                              {index + 1}
-                            </span>
-                            <span
-                              className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(
-                                exercise.status,
-                              )}`}
-                            >
-                              {exercise.status}
-                            </span>
-                            {isCustom && (
-                              <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[10px] font-semibold text-sky-700">
-                                Custom
-                              </span>
-                            )}
-                            {exercise.category && (
-                              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[10px] font-semibold text-neutral-600">
-                                {exercise.category}
-                              </span>
-                            )}
-                          </div>
-
-                          <input
-                            type="text"
-                            value={exercise.name}
-                            onChange={(event) =>
-                              updateExercise(exercise.exercise_id, (current) => ({
-                                ...current,
-                                name: event.target.value,
-                              }))
-                            }
-                            placeholder="Exercise name"
-                            className="mt-3 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-base font-semibold outline-none transition focus:border-teal-500 focus:bg-white focus-ring"
-                          />
-
-                          {(exercise.target_reps_or_time || exercise.target_notes) && (
-                            <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
-                              <p className="font-semibold text-neutral-900">
-                                Target: {exercise.target_sets ?? 0} x {exercise.target_reps_or_time}
-                              </p>
-                              {exercise.target_notes && (
-                                <p className="mt-1 leading-6 text-neutral-600">{exercise.target_notes}</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Status buttons */}
-                        <div className="flex flex-wrap gap-1.5">
-                          {!isCustom &&
-                            STATUS_OPTIONS.map((option) => (
-                              <button
-                                key={option.value}
-                                type="button"
-                                onClick={() =>
-                                  updateExercise(exercise.exercise_id, (current) => ({
-                                    ...current,
-                                    status: option.value,
-                                  }))
-                                }
-                                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${exercise.status === option.value
-                                  ? "border-teal-600 bg-teal-600 text-white"
-                                  : "border-neutral-200 bg-white text-neutral-600 hover:text-neutral-900"
-                                  }`}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          {isCustom && (
-                            <button
-                              type="button"
-                              onClick={() => removeCustomExercise(exercise.exercise_id)}
-                              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100"
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Per-set rows */}
-                      <div className="mt-4">
-                        {/* Header row — hidden on mobile, shown on lg */}
-                        <div className="hidden lg:grid lg:grid-cols-[2rem_1fr_1fr_1fr_1fr_2.5rem] lg:gap-2 lg:px-1 lg:pb-2 lg:text-xs lg:font-semibold lg:uppercase lg:tracking-wider lg:text-neutral-400">
-                          <span>#</span>
-                          <span>Reps</span>
-                          <span>Weight</span>
-                          <span>RPE</span>
-                          <span>Secs</span>
-                          <span />
-                        </div>
-
-                        <div className="space-y-2">
-                          {exercise.sets.map((set) => (
-                            <div
-                              key={set.set_id}
-                              className="flex flex-col gap-2 rounded-xl border border-neutral-100 bg-neutral-50/50 p-3 lg:grid lg:grid-cols-[2rem_1fr_1fr_1fr_1fr_2.5rem] lg:items-center lg:gap-2 lg:rounded-lg lg:border-0 lg:bg-transparent lg:p-0"
-                            >
-                              {/* Set number */}
-                              <span className="hidden text-xs font-bold text-neutral-400 lg:block">
-                                {set.set_number}
-                              </span>
-                              <span className="text-xs font-bold text-neutral-400 lg:hidden">
-                                Set {set.set_number}
-                              </span>
-
-                              {/* Mobile: 3-col grid for Reps/Weight/RPE */}
-                              <div className="grid grid-cols-3 gap-2 lg:contents">
-                                <label className="space-y-1 lg:space-y-0">
-                                  <span className="text-[10px] font-medium text-neutral-500 lg:hidden">Reps</span>
-                                  <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    value={set.reps}
-                                    disabled={disableActualFields}
-                                    onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "reps", e.target.value)}
-                                    placeholder="—"
-                                    className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm font-semibold outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
-                                  />
-                                </label>
-                                <label className="space-y-1 lg:space-y-0">
-                                  <span className="text-[10px] font-medium text-neutral-500 lg:hidden">lbs</span>
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    value={set.weight}
-                                    disabled={disableActualFields}
-                                    onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "weight", e.target.value)}
-                                    placeholder="—"
-                                    className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm font-semibold outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
-                                  />
-                                </label>
-                                <label className="space-y-1 lg:space-y-0">
-                                  <span className="text-[10px] font-medium text-neutral-500 lg:hidden">RPE</span>
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    max="10"
-                                    value={set.rpe}
-                                    disabled={disableActualFields}
-                                    onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "rpe", e.target.value)}
-                                    placeholder="—"
-                                    className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm font-semibold outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
-                                  />
-                                </label>
-                              </div>
-
-                              {/* Duration: hidden by default on mobile, 4th col on lg */}
-                              <label className="hidden space-y-1 lg:block lg:space-y-0">
-                                <span className="text-[10px] font-medium text-neutral-500 lg:hidden">Time (s)</span>
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  min="0"
-                                  value={set.duration_s}
-                                  disabled={disableActualFields}
-                                  onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "duration_s", e.target.value)}
-                                  placeholder="sec"
-                                  className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
-                                />
-                              </label>
-
-                              {/* Delete set */}
-                              {exercise.sets.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeSet(exercise.exercise_id, set.set_id)}
-                                  className="self-end rounded-lg p-1.5 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-500 lg:self-center"
-                                  aria-label="Remove set"
-                                >
-                                  <XCircle className="h-4 w-4" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Add set */}
-                        <button
-                          type="button"
-                          onClick={() => addSet(exercise.exercise_id)}
-                          disabled={disableActualFields}
-                          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 py-2 text-xs font-semibold text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700 disabled:opacity-50 lg:w-auto lg:px-4"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Add set
-                        </button>
-                      </div>
-
-                      {/* Exercise-level notes */}
-                      <div className="mt-3">
-                        <textarea
-                          value={exercise.exercise_notes}
-                          disabled={disableActualFields}
-                          onChange={(event) =>
-                            updateExercise(exercise.exercise_id, (current) => ({
-                              ...current,
-                              exercise_notes: event.target.value,
-                            }))
-                          }
-                          rows={2}
-                          placeholder="Exercise notes — cues, substitutions, how it felt..."
-                          className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:opacity-50 focus-ring"
-                        />
-                      </div>
-                    </article>
-                  );
-                })}
+                <ExerciseNav
+                  currentIndex={currentExerciseIndex}
+                  totalExercises={workoutDraft.exercises.length}
+                  exerciseName={workoutDraft.exercises[currentExerciseIndex]?.name}
+                  onPrev={() => setCurrentExerciseIndex(p => Math.max(0, p - 1))}
+                  onNext={() => setCurrentExerciseIndex(p => Math.min(workoutDraft.exercises.length - 1, p + 1))}
+                  onAddExercise={addCustomExercise}
+                  completedIndices={new Set(
+                    workoutDraft.exercises
+                      .map((ex, i) => ex.status === "completed" ? i : -1)
+                      .filter(i => i !== -1)
+                  )}
+                />
               </div>
             )}
-          </section>
+          </div>
+
+          <RestTimer
+            isRunning={restTimer.isRunning}
+            remainingSeconds={restTimer.remainingSeconds}
+            onSkip={restTimer.skip}
+            onAdjust={restTimer.adjust}
+            onClose={restTimer.skip}
+          />
+
+          <SessionMetaSheet
+            isOpen={isMetaSheetOpen}
+            onClose={() => setIsMetaSheetOpen(false)}
+            draft={workoutDraft}
+            onUpdateDraft={updateDraft}
+            selectedPlan={selectedPlan}
+            completionSummary={completionSummary}
+            isDirty={workoutIsDirty}
+            isExistingLog={!!selectedLog}
+          />
+
+          <WorkoutSummary
+            isOpen={isSummaryOpen}
+            onClose={() => setIsSummaryOpen(false)}
+            title={selectedPlan?.title || "Custom Workout"}
+            date={selectedDate}
+            durationSeconds={elapsedSeconds}
+            completedExercises={completionSummary.completed}
+            totalExercises={completionSummary.totalPlanned || workoutDraft.exercises.length}
+            sessionStreak={logs ? computeStreak(logs) : undefined}
+            painTrendAvg={logs ? computePainTrend(logs) : undefined}
+          />
         </div>
       )}
 
