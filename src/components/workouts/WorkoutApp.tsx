@@ -31,6 +31,16 @@ import {
 
 type WorkoutView = "today" | "history" | "programs";
 
+type SetDraft = {
+  set_id: string;
+  set_number: number;
+  reps: string;
+  weight: string;
+  duration_s: string;
+  rpe: string;
+  notes: string;
+};
+
 type WorkoutExerciseDraft = {
   exercise_id: string;
   plan_exercise_id?: string | null;
@@ -41,12 +51,8 @@ type WorkoutExerciseDraft = {
   target_sets?: number;
   target_reps_or_time?: string;
   target_notes?: string;
-  sets: string;
-  reps: string;
-  duration_minutes: string;
-  weight: string;
-  notes: string;
-  rpe: string;
+  sets: SetDraft[];
+  exercise_notes: string;
 };
 
 type WorkoutDraft = {
@@ -56,6 +62,17 @@ type WorkoutDraft = {
   workout_notes: string;
   completed_plan_id: string;
   exercises: WorkoutExerciseDraft[];
+};
+
+type LegacyPersistedExerciseDraft = Partial<WorkoutExerciseDraft> & {
+  reps?: string | number;
+  weight?: string | number;
+  duration_s?: string | number;
+  notes?: string;
+};
+
+type LegacyPersistedWorkoutDraft = Partial<WorkoutDraft> & {
+  exercises?: LegacyPersistedExerciseDraft[];
 };
 
 type ProgramDraft = {
@@ -97,10 +114,6 @@ function toStringValue(value?: string | number | null) {
   return value == null ? "" : String(value);
 }
 
-function toMinutes(durationSeconds?: number) {
-  return durationSeconds ? String(Math.round(durationSeconds / 60)) : "";
-}
-
 function toNumber(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -111,7 +124,142 @@ function toNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function makeSetDraft(setNumber: number, overrides?: Partial<SetDraft>): SetDraft {
+  return {
+    set_id: createId("set"),
+    set_number: setNumber,
+    reps: "",
+    weight: "",
+    duration_s: "",
+    rpe: "",
+    notes: "",
+    ...overrides,
+  };
+}
+
+function ensureSetDrafts(input: unknown, targetSetCount = 1): SetDraft[] {
+  const desiredCount = Math.max(targetSetCount, 1);
+
+  if (Array.isArray(input)) {
+    return input.map((setLike, index) => {
+      const set = typeof setLike === "object" && setLike !== null
+        ? (setLike as Partial<SetDraft>)
+        : {};
+
+      return makeSetDraft(set.set_number ?? index + 1, {
+        set_id: typeof set.set_id === "string" ? set.set_id : undefined,
+        reps: toStringValue(set.reps),
+        weight: toStringValue(set.weight),
+        duration_s: toStringValue(set.duration_s),
+        rpe: toStringValue(set.rpe),
+        notes: typeof set.notes === "string" ? set.notes : "",
+      });
+    });
+  }
+
+  const legacySetCount =
+    typeof input === "number"
+      ? input
+      : Number.parseInt(String(input ?? desiredCount), 10) || desiredCount;
+
+  return Array.from({ length: Math.max(legacySetCount, 1) }, (_, index) =>
+    makeSetDraft(index + 1),
+  );
+}
+
+function normalizeWorkoutDraft(raw: unknown, fallback: WorkoutDraft): WorkoutDraft {
+  if (!raw || typeof raw !== "object") {
+    return fallback;
+  }
+
+  const candidate = raw as LegacyPersistedWorkoutDraft;
+
+  const fallbackByPlanId = new Map(
+    fallback.exercises.map((exercise) => [exercise.plan_exercise_id ?? exercise.exercise_id, exercise]),
+  );
+
+  const exercises = Array.isArray(candidate.exercises)
+    ? candidate.exercises.map((exerciseLike, index) => {
+      const exercise = exerciseLike as LegacyPersistedExerciseDraft;
+      const fallbackExercise =
+        fallbackByPlanId.get(exercise.plan_exercise_id ?? exercise.exercise_id ?? "") ??
+        fallback.exercises[index];
+
+      const setDrafts =
+        Array.isArray(exercise.sets) && exercise.sets.length > 0
+          ? ensureSetDrafts(exercise.sets, fallbackExercise?.target_sets ?? 1)
+          : Array.from(
+            {
+              length:
+                Number.parseInt(
+                  String(exercise.target_sets ?? fallbackExercise?.target_sets ?? exercise.sets ?? 1),
+                  10,
+                ) || 1,
+            },
+            (_, setIndex) =>
+              makeSetDraft(setIndex + 1, {
+                reps: toStringValue(exercise.reps),
+                weight: toStringValue(exercise.weight),
+                duration_s: toStringValue(exercise.duration_s),
+                notes: exercise.notes ?? "",
+              }),
+          );
+
+      return {
+        exercise_id:
+          typeof exercise.exercise_id === "string"
+            ? exercise.exercise_id
+            : fallbackExercise?.exercise_id ?? createId("draft"),
+        plan_exercise_id:
+          typeof exercise.plan_exercise_id === "string" || exercise.plan_exercise_id === null
+            ? exercise.plan_exercise_id
+            : fallbackExercise?.plan_exercise_id,
+        name:
+          typeof exercise.name === "string" && exercise.name.trim()
+            ? exercise.name
+            : fallbackExercise?.name ?? "",
+        category:
+          typeof exercise.category === "string"
+            ? exercise.category
+            : fallbackExercise?.category,
+        primary_muscle:
+          typeof exercise.primary_muscle === "string"
+            ? exercise.primary_muscle
+            : fallbackExercise?.primary_muscle,
+        status:
+          typeof exercise.status === "string"
+            ? (exercise.status as WorkoutExerciseStatus)
+            : fallbackExercise?.status ?? "planned",
+        target_sets: fallbackExercise?.target_sets,
+        target_reps_or_time: fallbackExercise?.target_reps_or_time,
+        target_notes: fallbackExercise?.target_notes,
+        sets: setDrafts,
+        exercise_notes:
+          typeof exercise.exercise_notes === "string"
+            ? exercise.exercise_notes
+            : exercise.notes ?? fallbackExercise?.exercise_notes ?? "",
+      };
+    })
+    : fallback.exercises;
+
+  return {
+    date: typeof candidate.date === "string" ? candidate.date : fallback.date,
+    focus: typeof candidate.focus === "string" ? candidate.focus : fallback.focus,
+    rpe: typeof candidate.rpe === "string" ? candidate.rpe : fallback.rpe,
+    workout_notes:
+      typeof candidate.workout_notes === "string"
+        ? candidate.workout_notes
+        : fallback.workout_notes,
+    completed_plan_id:
+      typeof candidate.completed_plan_id === "string"
+        ? candidate.completed_plan_id
+        : fallback.completed_plan_id,
+    exercises,
+  };
+}
+
 function makeExerciseDraftFromPlan(exercise: PlanExercise): WorkoutExerciseDraft {
+  const targetSetCount = exercise.target_sets ?? 1;
   return {
     exercise_id: createId("draft"),
     plan_exercise_id: exercise.exercise_id,
@@ -122,16 +270,47 @@ function makeExerciseDraftFromPlan(exercise: PlanExercise): WorkoutExerciseDraft
     target_sets: exercise.target_sets,
     target_reps_or_time: exercise.target_reps_or_time,
     target_notes: exercise.notes,
-    sets: toStringValue(exercise.target_sets),
-    reps: "",
-    duration_minutes: "",
-    weight: "",
-    notes: "",
-    rpe: "",
+    sets: Array.from({ length: targetSetCount }, (_, i) => makeSetDraft(i + 1)),
+    exercise_notes: "",
   };
 }
 
 function makeExerciseDraftFromLog(exercise: LoggedExercise): WorkoutExerciseDraft {
+  let sets: SetDraft[];
+
+  if (exercise.logged_sets?.length) {
+    sets = exercise.logged_sets.map((s) =>
+      makeSetDraft(s.set_number, {
+        reps: s.reps != null ? String(s.reps) : "",
+        weight: s.weight_lbs != null ? String(s.weight_lbs) : "",
+        duration_s: s.duration_s ? String(s.duration_s) : "",
+        rpe: s.rpe != null ? String(s.rpe) : "",
+        notes: s.notes ?? "",
+      }),
+    );
+  } else {
+    // Legacy: single aggregated set
+    sets = [
+      makeSetDraft(1, {
+        reps: exercise.reps != null ? String(exercise.reps) : "",
+        weight: exercise.weight != null ? String(exercise.weight) : (exercise.weight_lbs != null ? String(exercise.weight_lbs) : ""),
+        duration_s: exercise.duration_s ? String(exercise.duration_s) : "",
+        rpe: exercise.rpe != null ? String(exercise.rpe) : "",
+      }),
+    ];
+    // If multiple sets were logged in legacy, duplicate the row
+    if (exercise.sets > 1) {
+      for (let i = 1; i < exercise.sets; i++) {
+        sets.push(makeSetDraft(i + 1, {
+          reps: sets[0].reps,
+          weight: sets[0].weight,
+          duration_s: sets[0].duration_s,
+          rpe: sets[0].rpe,
+        }));
+      }
+    }
+  }
+
   return {
     exercise_id: exercise.exercise_id,
     plan_exercise_id: exercise.plan_exercise_id ?? undefined,
@@ -139,12 +318,8 @@ function makeExerciseDraftFromLog(exercise: LoggedExercise): WorkoutExerciseDraf
     category: exercise.category,
     primary_muscle: exercise.primary_muscle,
     status: exercise.status,
-    sets: toStringValue(exercise.sets),
-    reps: toStringValue(exercise.reps),
-    duration_minutes: toMinutes(exercise.duration_s),
-    weight: toStringValue(exercise.weight ?? exercise.weight_lbs),
-    notes: exercise.notes ?? "",
-    rpe: toStringValue(exercise.rpe),
+    sets,
+    exercise_notes: exercise.notes ?? "",
   };
 }
 
@@ -202,23 +377,37 @@ function buildWorkoutDraft(
 }
 
 function buildWorkoutPayload(draft: WorkoutDraft, existingLog?: TrainingLogRecord) {
-  const exercises: LoggedExercise[] = draft.exercises.map((exercise) => ({
-    exercise_id: exercise.exercise_id,
-    plan_exercise_id: exercise.plan_exercise_id ?? null,
-    name: exercise.name,
-    category: exercise.category || undefined,
-    primary_muscle: exercise.primary_muscle || undefined,
-    status: exercise.status,
-    sets: toNumber(exercise.sets) ?? 0,
-    reps: exercise.reps.trim() ? (toNumber(exercise.reps) ?? exercise.reps.trim()) : undefined,
-    weight: toNumber(exercise.weight),
-    weight_lbs: toNumber(exercise.weight),
-    duration_s: toNumber(exercise.duration_minutes)
-      ? (toNumber(exercise.duration_minutes) ?? 0) * 60
-      : undefined,
-    rpe: toNumber(exercise.rpe),
-    notes: exercise.notes.trim() || undefined,
-  }));
+  const exercises: LoggedExercise[] = draft.exercises.map((exercise) => {
+    const logged_sets = exercise.sets.map((s) => ({
+      set_number: s.set_number,
+      reps: s.reps.trim() ? (toNumber(s.reps) ?? s.reps.trim()) : undefined,
+      weight_lbs: toNumber(s.weight),
+      duration_s: toNumber(s.duration_s),
+      rpe: toNumber(s.rpe),
+      notes: s.notes.trim() || undefined,
+    }));
+
+    // Compute aggregate fields for backward compat (use first set for reps/weight)
+    const firstSet = logged_sets[0];
+    return {
+      exercise_id: exercise.exercise_id,
+      plan_exercise_id: exercise.plan_exercise_id ?? null,
+      name: exercise.name,
+      category: exercise.category || undefined,
+      primary_muscle: exercise.primary_muscle || undefined,
+      status: exercise.status,
+      sets: logged_sets.length,
+      reps: firstSet?.reps,
+      weight: typeof firstSet?.weight_lbs === "number" ? firstSet.weight_lbs : undefined,
+      weight_lbs: firstSet?.weight_lbs,
+      duration_s: firstSet?.duration_s,
+      rpe: toNumber(exercise.sets.length > 0
+        ? String(Math.round(exercise.sets.reduce((sum, s) => sum + (toNumber(s.rpe) ?? 0), 0) / Math.max(exercise.sets.filter(s => s.rpe.trim()).length, 1)))
+        : ""),
+      notes: exercise.exercise_notes.trim() || undefined,
+      logged_sets,
+    };
+  });
 
   return {
     date: draft.date,
@@ -338,7 +527,7 @@ export default function WorkoutApp() {
     const savedDraft = window.localStorage.getItem(`workout-draft:${selectedDate}`);
     if (savedDraft) {
       try {
-        setWorkoutDraft(JSON.parse(savedDraft) as WorkoutDraft);
+        setWorkoutDraft(normalizeWorkoutDraft(JSON.parse(savedDraft), baseDraft));
       } catch {
         setWorkoutDraft(baseDraft);
       }
@@ -448,12 +637,8 @@ export default function WorkoutApp() {
             exercise_id: createId("exercise"),
             name: "",
             status: "added",
-            sets: "1",
-            reps: "",
-            duration_minutes: "",
-            weight: "",
-            notes: "",
-            rpe: "",
+            sets: [makeSetDraft(1)],
+            exercise_notes: "",
           },
         ],
       };
@@ -471,6 +656,36 @@ export default function WorkoutApp() {
         exercises: current.exercises.filter((exercise) => exercise.exercise_id !== exerciseId),
       };
     });
+  }
+
+  function addSet(exerciseId: string) {
+    updateExercise(exerciseId, (exercise) => ({
+      ...exercise,
+      sets: [...exercise.sets, makeSetDraft(exercise.sets.length + 1)],
+    }));
+  }
+
+  function removeSet(exerciseId: string, setId: string) {
+    updateExercise(exerciseId, (exercise) => ({
+      ...exercise,
+      sets: exercise.sets
+        .filter((s) => s.set_id !== setId)
+        .map((s, i) => ({ ...s, set_number: i + 1 })),
+    }));
+  }
+
+  function updateSet(
+    exerciseId: string,
+    setId: string,
+    field: keyof SetDraft,
+    value: string,
+  ) {
+    updateExercise(exerciseId, (exercise) => ({
+      ...exercise,
+      sets: exercise.sets.map((s) =>
+        s.set_id === setId ? { ...s, [field]: value } : s,
+      ),
+    }));
   }
 
   async function handleWorkoutSave() {
@@ -601,8 +816,8 @@ export default function WorkoutApp() {
 
   return (
     <div className="space-y-6 pb-24">
-      <section className="rounded-[2rem] border border-white/70 bg-white/90 p-5 shadow-sm md:p-7">
-        <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+      <section className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-sm lg:p-7">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
               Workout Program Tracker
@@ -617,7 +832,7 @@ export default function WorkoutApp() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:min-w-[320px]">
+          <div className="grid grid-cols-2 gap-3 lg:min-w-[320px]">
             <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
                 Selected date
@@ -656,13 +871,13 @@ export default function WorkoutApp() {
 
       {view === "today" && (
         <div className="space-y-6">
-          <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm md:p-6">
+          <section className="grid gap-4">
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
               <div className="flex items-center gap-2 text-sm font-semibold text-neutral-700">
                 <CalendarDays className="h-4 w-4 text-teal-600" />
                 Session setup
               </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-neutral-700">Date</span>
                   <input
@@ -719,7 +934,7 @@ export default function WorkoutApp() {
               </label>
             </div>
 
-            <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6">
               <div className="flex items-center gap-2 text-sm font-semibold text-neutral-700">
                 <Target className="h-4 w-4 text-teal-600" />
                 Program context
@@ -808,34 +1023,32 @@ export default function WorkoutApp() {
                   return (
                     <article
                       key={exercise.exercise_id}
-                      className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm md:p-6"
+                      className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6"
                     >
-                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                        <div>
+                      {/* Header: index badge + status + tags */}
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-
-                            <div className="flex flex-wrap items-center gap-3">
-                              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 text-xs font-semibold text-neutral-500">
-                                {index + 1}
+                            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 text-xs font-semibold text-neutral-500">
+                              {index + 1}
+                            </span>
+                            <span
+                              className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(
+                                exercise.status,
+                              )}`}
+                            >
+                              {exercise.status}
+                            </span>
+                            {isCustom && (
+                              <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[10px] font-semibold text-sky-700">
+                                Custom
                               </span>
-                              <span
-                                className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(
-                                  exercise.status,
-                                )}`}
-                              >
-                                {exercise.status}
+                            )}
+                            {exercise.category && (
+                              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[10px] font-semibold text-neutral-600">
+                                {exercise.category}
                               </span>
-                              {isCustom && (
-                                <span className="label-text text-[10px] rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sky-700">
-                                  Custom
-                                </span>
-                              )}
-                              {exercise.category && (
-                                <span className="label-text text-[10px] rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-neutral-600">
-                                  {exercise.category}
-                                </span>
-                              )}
-                            </div>
+                            )}
                           </div>
 
                           <input
@@ -848,22 +1061,23 @@ export default function WorkoutApp() {
                               }))
                             }
                             placeholder="Exercise name"
-                            className="mt-4 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-base font-semibold outline-none transition focus:border-teal-500 focus:bg-white focus-ring"
+                            className="mt-3 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-base font-semibold outline-none transition focus:border-teal-500 focus:bg-white focus-ring"
                           />
 
                           {(exercise.target_reps_or_time || exercise.target_notes) && (
-                            <div className="mt-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600 elevation-1 interactive-card">
+                            <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
                               <p className="font-semibold text-neutral-900">
                                 Target: {exercise.target_sets ?? 0} x {exercise.target_reps_or_time}
                               </p>
                               {exercise.target_notes && (
-                                <p className="mt-2 leading-6 text-neutral-600">{exercise.target_notes}</p>
+                                <p className="mt-1 leading-6 text-neutral-600">{exercise.target_notes}</p>
                               )}
                             </div>
                           )}
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
+                        {/* Status buttons */}
+                        <div className="flex flex-wrap gap-1.5">
                           {!isCustom &&
                             STATUS_OPTIONS.map((option) => (
                               <button
@@ -875,7 +1089,7 @@ export default function WorkoutApp() {
                                     status: option.value,
                                   }))
                                 }
-                                className={`rounded-full border px-3 py-2 text-xs font-semibold transition-colors elevation-1 interactive-card ${exercise.status === option.value
+                                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${exercise.status === option.value
                                   ? "border-teal-600 bg-teal-600 text-white"
                                   : "border-neutral-200 bg-white text-neutral-600 hover:text-neutral-900"
                                   }`}
@@ -887,7 +1101,7 @@ export default function WorkoutApp() {
                             <button
                               type="button"
                               onClick={() => removeCustomExercise(exercise.exercise_id)}
-                              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 elevation-1 interactive-card"
+                              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100"
                             >
                               Remove
                             </button>
@@ -895,104 +1109,131 @@ export default function WorkoutApp() {
                         </div>
                       </div>
 
-                      <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-                        <label className="space-y-2">
-                          <span className="text-sm font-medium text-neutral-700">Sets</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={exercise.sets}
-                            disabled={disableActualFields}
-                            onChange={(event) =>
-                              updateExercise(exercise.exercise_id, (current) => ({
-                                ...current,
-                                sets: event.target.value,
-                              }))
-                            }
-                            className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
-                          />
-                        </label>
-                        <label className="space-y-2">
-                          <span className="text-sm font-medium text-neutral-700">Reps</span>
-                          <input
-                            type="text"
-                            value={exercise.reps}
-                            disabled={disableActualFields}
-                            onChange={(event) =>
-                              updateExercise(exercise.exercise_id, (current) => ({
-                                ...current,
-                                reps: event.target.value,
-                              }))
-                            }
-                            placeholder="10 or 10 each side"
-                            className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
-                          />
-                        </label>
-                        <label className="space-y-2">
-                          <span className="text-sm font-medium text-neutral-700">Duration (min)</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={exercise.duration_minutes}
-                            disabled={disableActualFields}
-                            onChange={(event) =>
-                              updateExercise(exercise.exercise_id, (current) => ({
-                                ...current,
-                                duration_minutes: event.target.value,
-                              }))
-                            }
-                            className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
-                          />
-                        </label>
-                        <label className="space-y-2">
-                          <span className="text-sm font-medium text-neutral-700">Weight (lbs)</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={exercise.weight}
-                            disabled={disableActualFields}
-                            onChange={(event) =>
-                              updateExercise(exercise.exercise_id, (current) => ({
-                                ...current,
-                                weight: event.target.value,
-                              }))
-                            }
-                            className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
-                          />
-                        </label>
-                        <label className="space-y-2">
-                          <span className="text-sm font-medium text-neutral-700">Exercise RPE</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="10"
-                            value={exercise.rpe}
-                            disabled={disableActualFields}
-                            onChange={(event) =>
-                              updateExercise(exercise.exercise_id, (current) => ({
-                                ...current,
-                                rpe: event.target.value,
-                              }))
-                            }
-                            className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
-                          />
-                        </label>
+                      {/* Per-set rows */}
+                      <div className="mt-4">
+                        {/* Header row — hidden on mobile, shown on lg */}
+                        <div className="hidden lg:grid lg:grid-cols-[2rem_1fr_1fr_1fr_1fr_2.5rem] lg:gap-2 lg:px-1 lg:pb-2 lg:text-xs lg:font-semibold lg:uppercase lg:tracking-wider lg:text-neutral-400">
+                          <span>#</span>
+                          <span>Reps</span>
+                          <span>Weight</span>
+                          <span>RPE</span>
+                          <span>Secs</span>
+                          <span />
+                        </div>
+
+                        <div className="space-y-2">
+                          {exercise.sets.map((set) => (
+                            <div
+                              key={set.set_id}
+                              className="flex flex-col gap-2 rounded-xl border border-neutral-100 bg-neutral-50/50 p-3 lg:grid lg:grid-cols-[2rem_1fr_1fr_1fr_1fr_2.5rem] lg:items-center lg:gap-2 lg:rounded-lg lg:border-0 lg:bg-transparent lg:p-0"
+                            >
+                              {/* Set number */}
+                              <span className="hidden text-xs font-bold text-neutral-400 lg:block">
+                                {set.set_number}
+                              </span>
+                              <span className="text-xs font-bold text-neutral-400 lg:hidden">
+                                Set {set.set_number}
+                              </span>
+
+                              {/* Mobile: 3-col grid for Reps/Weight/RPE */}
+                              <div className="grid grid-cols-3 gap-2 lg:contents">
+                                <label className="space-y-1 lg:space-y-0">
+                                  <span className="text-[10px] font-medium text-neutral-500 lg:hidden">Reps</span>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={set.reps}
+                                    disabled={disableActualFields}
+                                    onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "reps", e.target.value)}
+                                    placeholder="—"
+                                    className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm font-semibold outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
+                                  />
+                                </label>
+                                <label className="space-y-1 lg:space-y-0">
+                                  <span className="text-[10px] font-medium text-neutral-500 lg:hidden">lbs</span>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0"
+                                    value={set.weight}
+                                    disabled={disableActualFields}
+                                    onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "weight", e.target.value)}
+                                    placeholder="—"
+                                    className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm font-semibold outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
+                                  />
+                                </label>
+                                <label className="space-y-1 lg:space-y-0">
+                                  <span className="text-[10px] font-medium text-neutral-500 lg:hidden">RPE</span>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0"
+                                    max="10"
+                                    value={set.rpe}
+                                    disabled={disableActualFields}
+                                    onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "rpe", e.target.value)}
+                                    placeholder="—"
+                                    className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm font-semibold outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
+                                  />
+                                </label>
+                              </div>
+
+                              {/* Duration: hidden by default on mobile, 4th col on lg */}
+                              <label className="hidden space-y-1 lg:block lg:space-y-0">
+                                <span className="text-[10px] font-medium text-neutral-500 lg:hidden">Time (s)</span>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min="0"
+                                  value={set.duration_s}
+                                  disabled={disableActualFields}
+                                  onChange={(e) => updateSet(exercise.exercise_id, set.set_id, "duration_s", e.target.value)}
+                                  placeholder="sec"
+                                  className="w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-center text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-50"
+                                />
+                              </label>
+
+                              {/* Delete set */}
+                              {exercise.sets.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeSet(exercise.exercise_id, set.set_id)}
+                                  className="self-end rounded-lg p-1.5 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-500 lg:self-center"
+                                  aria-label="Remove set"
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add set */}
+                        <button
+                          type="button"
+                          onClick={() => addSet(exercise.exercise_id)}
+                          disabled={disableActualFields}
+                          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 py-2 text-xs font-semibold text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700 disabled:opacity-50 lg:w-auto lg:px-4"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add set
+                        </button>
                       </div>
 
-                      <div className="mt-4 block space-y-2">
-                        <span className="text-sm font-medium text-neutral-700">Notes</span>
+                      {/* Exercise-level notes */}
+                      <div className="mt-3">
                         <textarea
-                          value={exercise.notes}
+                          value={exercise.exercise_notes}
                           disabled={disableActualFields}
                           onChange={(event) =>
                             updateExercise(exercise.exercise_id, (current) => ({
                               ...current,
-                              notes: event.target.value,
+                              exercise_notes: event.target.value,
                             }))
                           }
-                          rows={3}
-                          placeholder="What changed, how it felt, cues, substitutions..."
-                          className="w-full rounded-[1.5rem] border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
+                          rows={2}
+                          placeholder="Exercise notes — cues, substitutions, how it felt..."
+                          className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none transition focus:border-teal-500 focus:bg-white disabled:opacity-50 focus-ring"
                         />
                       </div>
                     </article>
@@ -1019,9 +1260,9 @@ export default function WorkoutApp() {
             {historyItems.map(({ log, plan, summary }) => (
               <article
                 key={log.date}
-                className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm md:p-6 elevation-1"
+                className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6 elevation-1"
               >
-                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">
                       {formatDateLabel(log.date)}
@@ -1054,9 +1295,9 @@ export default function WorkoutApp() {
       )}
 
       {view === "programs" && (
-        <section className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+        <section className="grid gap-6">
           <div className="space-y-4">
-            <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm md:p-6 elevation-1">
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6 elevation-1">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
@@ -1109,10 +1350,10 @@ export default function WorkoutApp() {
             </div>
           </div>
 
-          <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm md:p-6 elevation-1">
+          <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:p-6 elevation-1">
             {programDraft ? (
               <div className="space-y-5">
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 lg:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-neutral-700">Program title</span>
                     <input
@@ -1307,8 +1548,8 @@ export default function WorkoutApp() {
         </section>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/70 bg-white/95 px-4 py-4 backdrop-blur-xl md:px-8">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/70 bg-white/95 px-3 py-3 backdrop-blur-xl lg:px-8 lg:py-4 safe-bottom">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {view === "today" && workoutMessage && (
               <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">

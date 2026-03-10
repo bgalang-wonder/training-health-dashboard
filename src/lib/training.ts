@@ -21,6 +21,15 @@ export interface TrainingPlanVersion {
   exercises: PlanExercise[];
 }
 
+export interface LoggedSet {
+  set_number: number;
+  reps?: number | string;
+  weight_lbs?: number;
+  duration_s?: number;
+  rpe?: number;
+  notes?: string;
+}
+
 export interface LoggedExercise {
   exercise_id: string;
   plan_exercise_id?: string | null;
@@ -35,6 +44,7 @@ export interface LoggedExercise {
   duration_s?: number;
   rpe?: number;
   notes?: string;
+  logged_sets?: LoggedSet[];
 }
 
 export type SymptomStatus = string;
@@ -71,6 +81,22 @@ export function calculateTotalLoad(exercises: LoggedExercise[] | undefined): num
   }
 
   return exercises.reduce((total, exercise) => {
+    // Prefer per-set data when available
+    if (exercise.logged_sets?.length) {
+      return total + exercise.logged_sets.reduce((setTotal, set) => {
+        const reps =
+          typeof set.reps === "number"
+            ? set.reps
+            : Number.parseFloat(String(set.reps ?? ""));
+        const weight = set.weight_lbs ?? 0;
+        if (!Number.isFinite(reps) || !weight) {
+          return setTotal;
+        }
+        return setTotal + reps * weight;
+      }, 0);
+    }
+
+    // Fall back to legacy aggregate fields
     const reps =
       typeof exercise.reps === "number"
         ? exercise.reps

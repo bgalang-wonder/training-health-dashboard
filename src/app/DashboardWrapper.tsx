@@ -431,7 +431,7 @@ export default function DashboardWrapper({ data, plans }: { data: any[], plans: 
         <div className="space-y-10">
 
             {/* 0. Flare-Up Free Streak Banner */}
-            <div className="flex items-center justify-between elevation-1 rounded-2xl p-4 md:p-6">
+            <div className="flex items-center justify-between elevation-1 rounded-2xl p-3 lg:p-6">
                 <div className="flex items-center gap-4">
                     <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
                         <Zap className="w-6 h-6 text-amber-500" />
@@ -538,11 +538,11 @@ export default function DashboardWrapper({ data, plans }: { data: any[], plans: 
             )}
 
             {/* 2. Charts Section */}
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <section className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
 
                 {/* Main Correlation Chart: Readiness vs RPE */}
-                <div className="bg-white border border-neutral-200 rounded-2xl p-4 md:p-6 flex flex-col h-[300px] md:h-[420px] shadow-sm">
-                    <div className="mb-4 md:mb-6">
+                <div className="bg-white border border-neutral-200 rounded-2xl p-3 lg:p-6 flex flex-col h-[220px] lg:h-[420px] shadow-sm">
+                    <div className="mb-3 lg:mb-6">
                         <h3 className="text-base font-semibold mb-1 flex items-center gap-2 text-neutral-900">
                             <Flame className="w-4 h-4 text-orange-500" />
                             Recovery vs. Exertion
@@ -583,8 +583,8 @@ export default function DashboardWrapper({ data, plans }: { data: any[], plans: 
                 </div>
 
                 {/* Secondary Chart: Sleep & HRV */}
-                <div className="bg-white border border-neutral-200 rounded-2xl p-4 md:p-6 flex flex-col h-[300px] md:h-[420px] shadow-sm">
-                    <div className="mb-4 md:mb-6">
+                <div className="bg-white border border-neutral-200 rounded-2xl p-3 lg:p-6 flex flex-col h-[220px] lg:h-[420px] shadow-sm">
+                    <div className="mb-3 lg:mb-6">
                         <h3 className="text-base font-semibold mb-1 flex items-center gap-2 text-neutral-900">
                             <HeartPulse className="w-4 h-4 text-rose-500" />
                             Underlying Physiology
@@ -627,7 +627,7 @@ export default function DashboardWrapper({ data, plans }: { data: any[], plans: 
 
             {/* 3. Daily Focus (Log + Intraday HR) */}
             <section className="space-y-6 pt-4" ref={dailyFocusRef}>
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-neutral-200 pb-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-neutral-200 pb-4">
                     <div>
                         <h2 className="text-xl font-semibold flex items-center gap-2 text-neutral-900 tracking-wide">
                             <Activity className="w-5 h-5 text-blue-500" />
@@ -638,7 +638,7 @@ export default function DashboardWrapper({ data, plans }: { data: any[], plans: 
                 </div>
 
                 {/* Week-at-a-Glance Strip as Primary Navigator */}
-                <div className="elevation-1 rounded-2xl p-4 md:p-5">
+                <div className="elevation-1 rounded-2xl p-3 lg:p-5">
                     <div className="flex items-center justify-between mb-3">
                         <h3 className="heading-sm text-neutral-700 tracking-wide">Timeline</h3>
                         <p className="micro-text text-neutral-400">Select a day to inspect details</p>
@@ -692,7 +692,7 @@ export default function DashboardWrapper({ data, plans }: { data: any[], plans: 
                 </div>
 
                 {/* Render the Intraday HR Chart inside the Daily View */}
-                <div className="bg-white border border-neutral-200 rounded-2xl p-4 md:p-6 flex flex-col h-[300px] md:h-[380px] shadow-sm">
+                <div className="bg-white border border-neutral-200 rounded-2xl p-3 lg:p-6 flex flex-col h-[200px] lg:h-[380px] shadow-sm">
                     <div className="mb-4">
                         <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5 text-neutral-900">
                             <Activity className="w-3.5 h-3.5 text-sky-500" />

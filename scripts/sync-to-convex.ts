@@ -13,10 +13,9 @@ const client = new ConvexHttpClient(url);
 async function main() {
     console.log("\\n--- Syncing latest Oura Data to Convex ---");
 
-    // Sync the last 7 days to keep it fast but capture any delayed Oura updates
-    const date = new Date();
-    date.setDate(date.getDate() - 7);
-    const start_date = date.toISOString().split('T')[0];
+    // Sync from Feb 25th as requested, or default to last 14 days
+    const start_date = process.env.OURA_SYNC_START || "2026-02-25";
+    console.log(`Syncing from: ${start_date}`);
 
     const ouraData = await fetchOuraData(start_date);
     let count = 0;

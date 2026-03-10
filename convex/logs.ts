@@ -1,6 +1,15 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
+const loggedSet = v.object({
+    set_number: v.number(),
+    reps: v.optional(v.union(v.number(), v.string())),
+    weight_lbs: v.optional(v.number()),
+    duration_s: v.optional(v.number()),
+    rpe: v.optional(v.number()),
+    notes: v.optional(v.string()),
+});
+
 const loggedExercise = v.object({
     exercise_id: v.optional(v.string()),
     plan_exercise_id: v.optional(v.union(v.string(), v.null())),
@@ -23,6 +32,7 @@ const loggedExercise = v.object({
     duration_s: v.optional(v.number()),
     rpe: v.optional(v.number()),
     notes: v.optional(v.string()),
+    logged_sets: v.optional(v.array(loggedSet)),
 });
 
 function slugify(value: string) {
