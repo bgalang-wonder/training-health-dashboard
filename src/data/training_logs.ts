@@ -1,31 +1,10 @@
-export interface ExecutedExercise {
-    name: string;
-    category?: "Push" | "Pull" | "Legs" | "Core" | "Conditioning" | "Mobility";
-    primary_muscle?: string;
-    weight_lbs?: number;
-    sets: number;
-    reps?: number;
-    duration_s?: number;
-    notes?: string;
-}
+import type { TrainingLogRecord } from "../lib/training";
 
-export interface TrainingLog {
-    date: string;
-    rpe?: number; // Rate of Perceived Exertion (1-10)
-    total_load?: number; // Sets x Reps x Weight
-    focus?: string; // Leg day, Pull day, Conditioning, etc
-    completed_plan_id?: string; // Links back to a plan
-    exercises?: ExecutedExercise[];
-    stressors?: string; // Flight, poor sleep, work stress
-    workout_notes?: string;
-    back_pain_score?: number; // 0-10 Pain level
-    pain_modifiers?: string; // e.g. "Sitting too long", "Morning stiffness"
-}
-
-export const trainingLogs: TrainingLog[] = [
+export const trainingLogs: TrainingLogRecord[] = [
     {
         date: "2026-02-25",
         focus: "Rest",
+        symptom_status: "symptom_free",
     },
     {
         date: "2026-02-26",
@@ -33,22 +12,76 @@ export const trainingLogs: TrainingLog[] = [
         focus: "Full Body Rx + Core",
         stressors: "Interview stress",
         workout_notes: "Workout felt good. Discovered a major compensatory mechanic: Sternum discomfort limited my thoracic (upper chest) extension. Because I couldn't extend through the upper back, my body forced compensatory extension into my lower back instead. Need to watch this. Forward flexion and side-bending are highly accessible.",
-        back_pain_score: 1, // Approximating based on "no pain" during workout but some guarding
+        symptom_status: "stiff",
+        symptom_location: "low_back",
+        symptom_detail: "Compensatory extension into lower back due to limited thoracic extension",
         pain_modifiers: "Arching/Extension",
-        completed_plan_id: "plan_1_feb26",
+        completed_plan_id: "ryan-rehab-v1",
         exercises: [
-            { name: "Beast crawl", sets: 1, duration_s: 30 },
-            { name: "Torsion buttress", sets: 2, duration_s: 10 },
-            { name: "Long lever bridge", sets: 2, reps: 12 },
-            { name: "Farmers carry", weight_lbs: 35, sets: 2, duration_s: 40 },
-            { name: "Single arm row", weight_lbs: 40, sets: 2, reps: 10 }
-        ]
+            { exercise_id: "log-2026-02-26-beast-crawl", plan_exercise_id: "ryan-rehab-v1-beast-crawl", name: "Beast crawl", status: "completed", sets: 1, duration_s: 30 },
+            { exercise_id: "log-2026-02-26-torsion-buttress", plan_exercise_id: "ryan-rehab-v1-torsion-buttress", name: "Torsion buttress", status: "modified", sets: 2, duration_s: 10 },
+            { exercise_id: "log-2026-02-26-long-lever-bridge", plan_exercise_id: "ryan-rehab-v1-long-lever-bridge", name: "Long lever bridge", status: "completed", sets: 2, reps: 12 },
+            { exercise_id: "log-2026-02-26-farmers-carry", plan_exercise_id: "ryan-rehab-v1-farmers-carry", name: "Farmers carry", status: "completed", weight_lbs: 35, sets: 2, duration_s: 40 },
+            { exercise_id: "log-2026-02-26-single-arm-row", plan_exercise_id: "ryan-rehab-v1-single-arm-row", name: "Single arm row", status: "completed", weight_lbs: 40, sets: 2, reps: 10 },
+        ],
     },
     {
         date: "2026-02-27",
         focus: "Recovery",
         stressors: "Interview stress",
         workout_notes: "Continued focus on avoiding extension.",
-        back_pain_score: 1
-    }
+        symptom_status: "stiff",
+        symptom_location: "low_back",
+    },
+    {
+        date: "2026-03-01",
+        rpe: 6,
+        focus: "Sunday Workout",
+        workout_notes: "Completed Sunday workout but forgot to do the torsion exercises.",
+        exercises: [
+            { exercise_id: "log-2026-03-01-beast-crawl", plan_exercise_id: "ryan-rehab-v1-beast-crawl", name: "Beast crawl", status: "completed", sets: 1, duration_s: 30 },
+            { exercise_id: "log-2026-03-01-long-lever-bridge", plan_exercise_id: "ryan-rehab-v1-long-lever-bridge", name: "Long lever bridge", status: "completed", sets: 2, reps: 12 },
+            { exercise_id: "log-2026-03-01-farmers-carry", plan_exercise_id: "ryan-rehab-v1-farmers-carry", name: "Farmers carry", status: "completed", weight_lbs: 35, sets: 2, duration_s: 40 },
+            { exercise_id: "log-2026-03-01-single-arm-row", plan_exercise_id: "ryan-rehab-v1-single-arm-row", name: "Single arm row", status: "completed", weight_lbs: 40, sets: 2, reps: 10 },
+        ],
+    },
+    {
+        date: "2026-03-03",
+        rpe: 7,
+        focus: "Lower Body — Single Leg Stability + Conditioning",
+        workout_notes: "Felt good overall, with the warm up nothing was causing my foot, hip, or back pain, though the one legged stuff definitely exposed the instability on my right side. Felt a pronounced difference between left and right, right felt like I was leaning and balancing with my joints rather than stabilizing with muscles like my left. Ryan identified lack of coordination/strength with this \"pogo\" drill. Wallsit calf raise and copenhagens helped with activation that improved stability. RPE was around a 7, though more on the cardiovascular/lactic acid taxing.",
+        symptom_status: "symptom_free",
+        exercises: [
+            { exercise_id: "log-2026-03-03-pogo-drill", name: "Pogo drill", status: "added", sets: 3, duration_s: 30, notes: "Exposed right side instability/coordination issues" },
+            { exercise_id: "log-2026-03-03-wallsit-calf-raise", name: "Wallsit calf raise", status: "added", sets: 3, reps: 15, notes: "Helped activation and improved stability" },
+            { exercise_id: "log-2026-03-03-copenhagen", plan_exercise_id: "ryan-rehab-v1-copenhagen", name: "Copenhagen", status: "modified", sets: 3, reps: 10, notes: "Helped activation and improved stability" },
+        ],
+    },
+    {
+        date: "2026-03-04",
+        focus: "Rest / Recovery Monitoring",
+        workout_notes: "Today in the morning, feeling it mostly in my adductors and glutes. Right hip near hip flexors feeling a bit \"stuck\" compared to my left (feels completely normal). Right hip joint feeling a bit stiff, but within tolerance. Not painful. Right calf feels a bit sore compared to left, can feel it prominently when I'm dorsiflexing.",
+        symptom_status: "stiff",
+        symptom_location: "hip",
+        symptom_detail: "Right hip near hip flexors feeling stuck, right hip joint stiff but within tolerance",
+        pain_modifiers: "Right hip stiffness, right calf soreness on dorsiflexion"
+    },
+    {
+        date: "2026-03-05",
+        rpe: 6,
+        focus: "Full Body — Flare up mid-workout",
+        stressors: "Interview prep/stress, less sleep than ideal (84 score, 7h41m)",
+        workout_notes: "Had a flare up midway through the session. Felt DOMS during RDLs (likely from previous session or the added KB swings). During the 2nd set of Copenhagens, felt uncomfortable in the lower back and had to stop as it started seizing up. Ryan suspects the KB swings or extension during Copenhagens. Plan: Repeat exact workout minus KB swings to isolate the trigger.\\n\\nNote from Ryan: Build a simple tracker focused on long term data collection that can auto populate into notion profiles to make graphs correlating physical activity to pain, sleep scores to performance, cardio to blood labs, etc.",
+        symptom_status: "low_moderate_pain",
+        symptom_location: "low_back",
+        symptom_detail: "Lower back seizing up during 2nd set of Copenhagens; felt 'amped up' and potentially overextended.",
+        pain_modifiers: "Copenhagens (extension?), KB swings (added strain?), DOMS",
+        completed_plan_id: "ryan-rehab-v1",
+        exercises: [
+            { exercise_id: "log-2026-03-05-beast-crawl", plan_exercise_id: "ryan-rehab-v1-beast-crawl", name: "Beast crawl", status: "completed", sets: 1, duration_s: 30 },
+            { exercise_id: "log-2026-03-05-1l-rdl", name: "1L RDL", status: "added", weight_lbs: 25, sets: 2, reps: 15, notes: "Felt DOMS during these" },
+            { exercise_id: "log-2026-03-05-copenhagen", plan_exercise_id: "ryan-rehab-v1-copenhagen", name: "Copenhagen", status: "modified", sets: 2, duration_s: 30, notes: "Flare up on 2nd set" },
+            { exercise_id: "log-2026-03-05-kettlebell-swings", name: "Kettlebell swings", status: "added", weight_lbs: 25, sets: 1, reps: 12, notes: "One-handed, suspected trigger" },
+        ],
+    },
 ];

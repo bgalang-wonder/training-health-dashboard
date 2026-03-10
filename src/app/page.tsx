@@ -1,57 +1,98 @@
-import { fetchOuraData } from "../lib/oura";
-import { trainingLogs } from "../data/training_logs";
-import { trainingPlans } from "../data/training_plans";
+"use client";
+
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import DashboardWrapper from "./DashboardWrapper";
+import { calculateTotalLoad, mapPlanVersionToLegacyPlan } from "../lib/training";
 
-export default async function Home() {
-  // Start from baseline
-  const start_date = "2026-02-25";
-  const ouraData = await fetchOuraData(start_date);
+export default function Home() {
+  const logs = useQuery(api.logs.list);
+  const plans = useQuery(api.plans.list);
+  const ouraDays = useQuery(api.oura.list);
 
-  // Merge Oura Data with Training Logs
-  const mergedData = trainingLogs.map(log => {
-    const ouraDay = ouraData[log.date] || null;
+  if (logs === undefined || plans === undefined || ouraDays === undefined) {
+    return (
+      <section className="flex min-h-[50vh] items-center justify-center rounded-[2rem] border border-neutral-200 bg-white/80 shadow-sm">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-sm font-medium text-neutral-500 animate-pulse">Syncing data...</p>
+        </div>
+      </section>
+    );
+  }
+
+  const formattedPlans = plans.map(mapPlanVersionToLegacyPlan);
+
+  const ouraMap = new Map();
+  for (const day of ouraDays) {
+    ouraMap.set(day.date, day);
+  }
+
+  const logsMap = new Map();
+  for (const log of logs) {
+    logsMap.set(log.date, log);
+  }
+
+  const allDates = new Set([
+    ...ouraDays.map(d => d.date),
+    ...logs.map(l => l.date)
+  ]);
+
+  const mergedData = Array.from(allDates).map(date => {
+    const ouraDay = ouraMap.get(date) || null;
+    const log = logsMap.get(date);
+
     return {
-      date: log.date,
-      rpe: log.rpe || 0,
-      focus: log.focus || "",
-      total_load: log.total_load || 0,
-      exercises: log.exercises || [],
+      date: date,
+      rpe: log?.rpe || 0,
+      focus: log?.focus || "",
+      total_load: log?.total_load || calculateTotalLoad(log?.exercises),
+      exercises: log?.exercises || [],
       readiness: ouraDay?.readiness_score || 0,
       sleep: ouraDay?.sleep_score || 0,
       hrv: ouraDay?.hrv_balance_score || 0,
-      stressors: log.stressors || "",
-      notes: log.workout_notes || "",
-      back_pain_score: log.back_pain_score ?? null,
-      pain_modifiers: log.pain_modifiers || "",
+      stressors: log?.stressors || "",
+      workout_notes: log?.workout_notes || "",
+      notes: "",
+      symptom_status: log?.symptom_status || null,
+      symptom_location: log?.symptom_location || null,
+      symptom_detail: log?.symptom_detail || "",
+      pain_modifiers: log?.pain_modifiers || "",
       heart_rate_data: ouraDay?.heart_rate_data || [],
-      plan: log.completed_plan_id ? trainingPlans.find(p => p.id === log.completed_plan_id) : null
+      sleep_periods: ouraDay?.sleep_periods || [],
+      completed_plan_id: log?.completed_plan_id || null,
+      plan: log?.completed_plan_id
+        ? formattedPlans.find((plan) => plan.id === log.completed_plan_id)
+        : null
     };
   }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  // We pass ALL plans to the dashboard so Brandon can flip through historical ones
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 font-sans">
-      <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
-
-        {/* Header */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-neutral-800 pb-6">
+    <div className="space-y-6">
+      <section className="rounded-[2rem] border border-white/70 bg-white/90 p-5 shadow-sm md:p-7">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-light tracking-tight text-white mb-2">Training Health</h1>
-            <p className="text-neutral-400">Syncing Oura + RPE + Stressors to track cost of training.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">
+              Recovery Dashboard
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-900">
+              See training cost next to readiness, sleep, and HRV
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
+              This stays read-focused: Oura context, symptom tracking, flare patterns, and plan
+              adherence over time. Use Workouts when you want to execute and log the session itself.
+            </p>
           </div>
           <div className="flex gap-3 text-sm">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-800/50 text-neutral-300 ring-1 ring-neutral-700/50">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-              Oura Connected
+            <div className="flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 font-medium text-emerald-700 ring-1 ring-emerald-200 shadow-sm">
+              <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+              Live (Convex)
             </div>
           </div>
-        </header>
+        </div>
+      </section>
 
-        {/* Client Wrapper for Charts & Interactions */}
-        <DashboardWrapper data={mergedData} plans={trainingPlans} />
-
-      </div>
-    </main>
+      <DashboardWrapper data={mergedData} plans={formattedPlans} />
+    </div>
   );
 }

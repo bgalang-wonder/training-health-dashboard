@@ -3,6 +3,11 @@ import path from "node:path";
 
 const OURA_RAW_DIR = path.join(process.cwd(), "data", "oura", "raw");
 
+export interface SleepPeriod {
+  bedtime_start: string;
+  bedtime_end: string;
+}
+
 export interface OuraDailySummary {
   date: string;
   readiness_score: number | null;
@@ -10,6 +15,7 @@ export interface OuraDailySummary {
   activity_score: number | null;
   hrv_balance_score: number | null;
   heart_rate_data: { timestamp: string; bpm: number }[];
+  sleep_periods: SleepPeriod[];
 }
 
 type OuraReadinessRecord = {
@@ -28,6 +34,13 @@ type OuraScoreRecord = {
 type OuraHeartRateRecord = {
   timestamp?: string;
   bpm?: number | null;
+};
+
+type OuraSleepPeriodRecord = {
+  day?: string;
+  bedtime_start?: string;
+  bedtime_end?: string;
+  type?: string;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -77,11 +90,13 @@ function createEmptySummary(date: string): OuraDailySummary {
     activity_score: null,
     hrv_balance_score: null,
     heart_rate_data: [],
+    sleep_periods: [],
   };
 }
 
 export async function fetchOuraData(startDate: string): Promise<Record<string, OuraDailySummary>> {
   const requiredEndpoints = ["daily_readiness", "daily_sleep", "daily_activity", "heartrate"] as const;
+  const optionalEndpoints = ["sleep"] as const;
 
   try {
     const payloads = await Promise.all(requiredEndpoints.map((endpoint) => readLocalEndpoint(endpoint)));
@@ -98,10 +113,14 @@ export async function fetchOuraData(startDate: string): Promise<Record<string, O
 
     const [readinessPayload, sleepPayload, activityPayload, heartratePayload] = payloads;
 
+    const optionalPayloads = await Promise.all(optionalEndpoints.map((endpoint) => readLocalEndpoint(endpoint)));
+    const [sleepPeriodsPayload] = optionalPayloads;
+
     const readinessData = extractDataArray<OuraReadinessRecord>(readinessPayload);
     const sleepData = extractDataArray<OuraScoreRecord>(sleepPayload);
     const activityData = extractDataArray<OuraScoreRecord>(activityPayload);
     const heartrateData = extractDataArray<OuraHeartRateRecord>(heartratePayload);
+    const sleepPeriodsData = sleepPeriodsPayload ? extractDataArray<OuraSleepPeriodRecord>(sleepPeriodsPayload) : [];
 
     const summaries: Record<string, OuraDailySummary> = {};
 
@@ -160,6 +179,23 @@ export async function fetchOuraData(startDate: string): Promise<Record<string, O
       summary.heart_rate_data.push({
         timestamp: item.timestamp,
         bpm: item.bpm,
+      });
+    }
+
+    for (const item of sleepPeriodsData) {
+      if (!item.day || item.day < startDate || !item.bedtime_start || !item.bedtime_end) {
+        continue;
+      }
+
+      // Only include primary sleep periods ("long_sleep"), not naps
+      if (item.type && item.type !== "long_sleep") {
+        continue;
+      }
+
+      const summary = ensureDay(item.day);
+      summary.sleep_periods.push({
+        bedtime_start: item.bedtime_start,
+        bedtime_end: item.bedtime_end,
       });
     }
 

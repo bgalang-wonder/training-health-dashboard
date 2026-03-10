@@ -9,6 +9,7 @@ const ENDPOINTS = [
   "daily_sleep",
   "daily_activity",
   "heartrate",
+  "sleep",
   "daily_stress",
   "workout",
   "session",
@@ -131,49 +132,80 @@ function supportsPagination(endpoint) {
 }
 
 async function fetchEndpoint(endpoint, token, range) {
-  const headers = {
-    Authorization: `Bearer ${token}`,
-  };
-
+  const headers = { Authorization: `Bearer ${token}` };
   const pages = [];
   const mergedData = [];
 
-  let nextToken = null;
+  // Oura heartrate endpoint only supports max 30 days per request.
+  // We chunk the date range into 30-day segments if needed.
+  let chunks = [{ start: range.start_date, end: range.end_date }];
 
-  do {
-    const url = new URL(`${OURA_API_BASE}/${endpoint}`);
+  if (endpoint === 'heartrate') {
+    const start = new Date(range.start_date);
+    const end = new Date(range.end_date);
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    if (supportsDateRange(endpoint)) {
-      url.searchParams.set("start_date", range.start_date);
-      url.searchParams.set("end_date", range.end_date);
+    if (diffDays > 30) {
+      chunks = [];
+      let current = new Date(start);
+      while (current <= end) {
+        let chunkEnd = new Date(current);
+        chunkEnd.setDate(current.getDate() + 29);
+        if (chunkEnd > end) chunkEnd = new Date(end);
+
+        chunks.push({
+          start: formatDate(current),
+          end: formatDate(chunkEnd)
+        });
+        current.setDate(current.getDate() + 30);
+      }
     }
+  }
 
-    if (nextToken) {
-      url.searchParams.set("next_token", nextToken);
-    }
+  for (const chunk of chunks) {
+    let nextToken = null;
+    do {
+      const url = new URL(`${OURA_API_BASE}/${endpoint}`);
 
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      const responseText = await response.text();
-      throw new Error(
-        `Failed ${endpoint} (${response.status} ${response.statusText}): ${responseText.slice(0, 500)}`,
-      );
-    }
+      if (supportsDateRange(endpoint)) {
+        if (endpoint === 'heartrate') {
+          url.searchParams.set("start_datetime", `${chunk.start}T00:00:00Z`);
+          // Use 23:59:59 to ensure we get the full last day
+          url.searchParams.set("end_datetime", `${chunk.end}T23:59:59Z`);
+        } else {
+          url.searchParams.set("start_date", chunk.start);
+          url.searchParams.set("end_date", chunk.end);
+        }
+      }
 
-    const payload = await response.json();
-    pages.push(payload);
+      if (nextToken) {
+        url.searchParams.set("next_token", nextToken);
+      }
 
-    if (Array.isArray(payload?.data)) {
-      mergedData.push(...payload.data);
-    }
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(
+          `Failed ${endpoint} (${response.status} ${response.statusText}): ${responseText.slice(0, 500)}`,
+        );
+      }
 
-    const receivedNextToken =
-      typeof payload?.next_token === "string" && payload.next_token.length > 0
-        ? payload.next_token
-        : null;
+      const payload = await response.json();
+      pages.push(payload);
 
-    nextToken = supportsPagination(endpoint) ? receivedNextToken : null;
-  } while (nextToken);
+      if (Array.isArray(payload?.data)) {
+        mergedData.push(...payload.data);
+      }
+
+      const receivedNextToken =
+        typeof payload?.next_token === "string" && payload.next_token.length > 0
+          ? payload.next_token
+          : null;
+
+      nextToken = supportsPagination(endpoint) ? receivedNextToken : null;
+    } while (nextToken);
+  }
 
   if (mergedData.length > 0 || (pages[0] && Array.isArray(pages[0].data))) {
     const normalized = { data: mergedData };

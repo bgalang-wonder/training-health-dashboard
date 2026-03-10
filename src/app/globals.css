@@ -14,6 +14,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* Keeping the dark mode stub, although the app is predominantly light-themed right now */
     --background: #0a0a0a;
     --foreground: #ededed;
   }
@@ -22,5 +23,51 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@utility heading-lg {
+  @apply text-2xl font-bold tracking-tight text-neutral-900;
+}
+
+@utility heading-sm {
+  @apply text-lg font-semibold tracking-tight text-neutral-900;
+}
+
+@utility body-text {
+  @apply text-sm leading-6 text-neutral-600;
+}
+
+@utility label-text {
+  @apply text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500;
+}
+
+@utility micro-text {
+  @apply text-[11px] font-medium tracking-wide;
+}
+
+@utility elevation-0 {
+  @apply shadow-none ring-0;
+}
+
+@utility elevation-1 {
+  @apply shadow-sm border border-neutral-200 bg-white;
+}
+
+@utility elevation-2 {
+  @apply shadow-md ring-1 ring-black/5 bg-white;
+}
+
+@utility focus-ring {
+  @apply outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white;
+}
+
+@utility interactive-card {
+  @apply transition-transform hover:-translate-y-0.5 hover:shadow-md cursor-pointer;
+}
+
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
 }
